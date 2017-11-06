@@ -6,6 +6,16 @@ username = <username of the Reddit account used to register the script applicati
 password = <password for the Reddit account used to register the script application>
 user_agent = /u/<bot username> operated by /u/<your username>
 
+[database]
+system = sqlite ; ex: `mysql+pymysql` or `postgresql`
+host = localhost
+database = ottomoderator.db ; for SQLite this is local file name
+; These are not needed for SQLite:
+; port = <db port>
+; username = <db username>
+; password = <db password>
+
+
 ; ---
 ; logging configuration section
 ; ---
