@@ -1,0 +1,31 @@
+; set up according to https://praw.readthedocs.io/en/latest/getting_started/authentication.html#script-application
+[reddit]
+client_id = <14 character string listed just under “personal use script”>
+client_secret = <27 character string listed adjacent to secret for the application>
+username = <username of the Reddit account used to register the script application>
+password = <password for the Reddit account used to register the script application>
+user_agent = /u/<bot username> operated by /u/<your username>
+
+; ---
+; logging configuration section
+; ---
+[loggers]
+keys = root
+
+[handlers]
+keys = roothand
+
+[formatters]
+keys = rootform
+
+[logger_root]
+level = INFO
+handlers = roothand
+
+[handler_roothand]
+class = StreamHandler
+formatter = rootform
+args = (sys.stdout,)
+
+[formatter_rootform]
+format = %(message)s
