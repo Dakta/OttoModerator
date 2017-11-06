@@ -1,0 +1,19 @@
+# Safe secrets in config files
+*.cfg
+
+# Don't index SQLite DB
+*.db
+
+# Compiled Python bytecode
+*.pyc
+
+# Editor turds (vim, joe)
+*~
+
+# macOS shit
+.DS_Store
+# Icon must end with \r\r
+Icon
+
+# Vim-specific crap
+.*.swp
