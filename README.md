@@ -11,7 +11,8 @@ Top level dependencies are recorded in `requirements.txt`. An exact list of
 operational state dependencies is recorded in `requirements.deploy.txt`. The
 former is used during development to maintain the actual dependencies of the
 project. The latter is used for deployment to ensure exact version
-compatibility.
+compatibility. [Based on Kenneth Jones'
+workflow](https://www.kennethreitz.org/essays/a-better-pip-workflow).
 
 During initial project setup, use `pip install -r
 requirements.depoly.txt` to ensure compatibility with known functional
