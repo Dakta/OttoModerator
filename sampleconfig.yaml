@@ -1,0 +1,27 @@
+---
+criteria:
+    type: ['post', 'comment', 'modmail', 'mention']
+    title: 'foo regex' # dependent on 'post' or 'modmail'
+    body: 'bar regex' # all types
+    reports: 3 # integer total count of reports; todo: report_reason and individual reason counts
+    is_reply: true # or false, applies to comment (effectively `is_top_level`) and modmail (effectively is first message) types
+    # OR, list of multiple criteria
+    - type: ['post', 'comment', 'modmail', 'mention']
+      body: 'whatever'
+    - type: ['post']
+      reports: 3
+    # ...
+actions:
+    report: 'Reason text'
+    action: spam, ham, approve # Note: setting modlog action reasons are not supported by the API
+
+    # OR, more complex
+    self:
+    parent:
+        reply (distinguished): "Message text with {{substitutions}}"
+    root (post): # note: root (comment) gets the top level comment of a chain, while this gets the parent post
+        action: remove
+        lock: true
+        nsfw: true
+        reply (sticky): "This thread has been locked."
+---

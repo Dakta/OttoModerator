@@ -19,12 +19,82 @@ from models import Subreddit
 # API wrapper
 import praw, prawcore
 
+# bot configuration parsing
+import yaml
+
 # for debugging
 import pprint
 
 
 # global reddit session
 r = None
+
+
+
+
+class Criteria:
+    """A set of conditions for matching Actions against reddit content"""
+    
+    def __init__(self, values):
+        pass
+
+    def matches(self, item):
+        for condition in self.conditions:
+            if not condition.matches(item):
+                return False
+
+        return True
+
+
+class Action:
+    """A sequence of steps to perform on and in response to reddit content"""
+    pass
+
+class Rule:
+    """A collection of conditions and response actions triggered on matching content"""
+
+    def __init__(self, values):
+        # TODO lowercase keys
+
+        self.yaml = yaml.dump(values)
+
+        # Handle single/multiple criteria
+        self.criteria = []
+        if isinstance(values["criteria"], list):
+            for criteria in values["criteria"]:
+                self.criteria.append(new Criteria(criteria))
+        elif isinstance(values["criteria"], dict):
+            self.criteria.append(new Criteria(values["criteria"]))
+
+        # same for actions
+        self.actions = []
+        if isinstance(values["actions"], list):
+            for action in values["actions"]:
+                self.actions.append(new Action(action))
+        elif isinstance(values["actions"], dict):
+            self.actions.append(new Action(values["actions"]))
+        # TODO consolidate the above two blocks, cleverly
+
+
+    def matches(self, item):
+        # for reference later?
+        self.matches = []
+
+        for criteria in self.criteria:
+            if criteria.matches(item):
+                self.matches.append(criteria.name)
+
+        if len(self.matches) > 0:
+            return True
+
+    def _perform_actions_on(self, item):
+        for action in self.actions:
+            actions.perform_on(item)
+
+    def process(self, item):
+        if self.matches(item):
+            self._perform_actions_on(item)
+
 
 
 def update_from_wiki(db_subreddit, message):
@@ -62,6 +132,23 @@ def update_from_wiki(db_subreddit, message):
     message.reply("{0}'s conditions were successfully updated for /r/{1}"
                   .format(username, subreddit.display_name))
     return True
+
+def update_rules_for_sr(rule_dict, subreddit): # , queues):
+    rule_dict[subreddit.name] = {}
+    rules = [Rule(d)
+                for d in yaml.safe_load_all(subreddit.conditions_yaml)
+                if isinstance(d, dict)]
+    # for queue in queues:
+    #     cond_dict[subreddit.name][queue] = filter_conditions(conditions, queue)
+
+
+def load_all_rules(sr_dict): # , queues):
+    rule_dict = {}
+    for sr in sr_dict.values():
+        update_rules_for_sr(rule_dict, sr) # , queues)
+
+    return rule_dict
+
 
 def indent_lines(lines):
     """Formatter for Markdown messages to generate code block from `lines`"""
@@ -158,6 +245,9 @@ def main():
             logger.debug(traceback.format_exc())
         else:
             sr_dict = get_moderated_subreddits()
+
+            # load conditions from wiki
+            rule_dict = load_all_rules(sr_dict)
 
             break
 
@@ -258,6 +348,7 @@ def main():
             # changed mod subs
             if reload_mod_subs:
                 sr_dict = get_moderated_subreddits()
+                rule_dict = load_all_rules(sr_dict)
 
             # Then process queues: submission, comment, spam, report, comment reply, username mention
             # TODO: queue for edited items...

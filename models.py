@@ -52,7 +52,7 @@ class Subreddit(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String(100), nullable=False, unique=True)
     enabled = Column(Boolean, nullable=False, default=True)
-    conditions_yaml = Column(Text)
+    conditions_yaml = Column(Text, nullable=False, default='')
     last_submission = Column(DateTime, nullable=False)
     last_comment = Column(DateTime, nullable=False)
     last_spam = Column(DateTime, nullable=False)
