@@ -32,67 +32,95 @@ r = None
 
 
 
-class Criteria:
+class Criterion:
     """A set of conditions for matching Actions against reddit content"""
-    
+
     def __init__(self, values):
-        pass
+        # convert the dict to attributes
+        self.conditions = values
 
     def matches(self, item):
-        for condition in self.conditions:
-            if not condition.matches(item):
+        logger.debug("Checking item {}".format(item))
+        # Conditions are in self.__dict__
+        for condition, value in self.conditions.items():
+            logger.debug("- Checking `{}` for `{}`".format(condition, value))
+
+            # uhhhh... this is kinda scary
+            if not getattr(item, condition, None) == value:
                 return False
+
+        # for condition in self.conditions:
+        #     if not condition.matches(item):
+        #         return False
 
         return True
 
 
 class Action:
     """A sequence of steps to perform on and in response to reddit content"""
-    pass
+
+    def __init__(self, values):
+        self.actions = values
+
+    def perform_on(self, item):
+        for action, argument in self.actions.items():
+            method = getattr(item, action, getattr(item.mod, action, None))
+            if method:
+                method(argument)
+            else:
+                raise AttributeError("No such method {} on {}".format(method, item))
 
 class Rule:
     """A collection of conditions and response actions triggered on matching content"""
 
     def __init__(self, values):
         # TODO lowercase keys
+        logger.debug("Creating new rule...")
 
         self.yaml = yaml.dump(values)
 
         # Handle single/multiple criteria
         self.criteria = []
         if isinstance(values["criteria"], list):
-            for criteria in values["criteria"]:
-                self.criteria.append(new Criteria(criteria))
+            for criterion in values["criteria"]:
+                self.criteria.append(Criterion(criterion))
         elif isinstance(values["criteria"], dict):
-            self.criteria.append(new Criteria(values["criteria"]))
+            self.criteria.append(Criterion(values["criteria"]))
 
         # same for actions
         self.actions = []
         if isinstance(values["actions"], list):
             for action in values["actions"]:
-                self.actions.append(new Action(action))
+                self.actions.append(Action(action))
         elif isinstance(values["actions"], dict):
-            self.actions.append(new Action(values["actions"]))
+            self.actions.append(Action(values["actions"]))
         # TODO consolidate the above two blocks, cleverly
+
+        pprint.pprint(vars(self))
+        for c in self.criteria:
+            pprint.pprint(vars(c))
+        for a in self.actions:
+            pprint.pprint(vars(a))
 
 
     def matches(self, item):
         # for reference later?
-        self.matches = []
+        self.matched = []
 
-        for criteria in self.criteria:
-            if criteria.matches(item):
-                self.matches.append(criteria.name)
+        for criterion in self.criteria:
+            if criterion.matches(item):
+                self.matched.append(criterion)
 
-        if len(self.matches) > 0:
+        if len(self.matched) > 0:
             return True
 
     def _perform_actions_on(self, item):
         for action in self.actions:
-            actions.perform_on(item)
+            action.perform_on(item)
 
     def process(self, item):
         if self.matches(item):
+            logger.debug("Matched {}".format(item))
             self._perform_actions_on(item)
 
 
@@ -106,7 +134,7 @@ def update_from_wiki(db_subreddit, message):
 
     subreddit = r.subreddit(db_subreddit.name)
 
-    if requester not in subreddit.moderator():
+    if message.author not in subreddit.moderator():
         message.reply('Error: You do not moderate /r/{0}'.format(subreddit.display_name))
         return
 
@@ -135,11 +163,20 @@ def update_from_wiki(db_subreddit, message):
 
 def update_rules_for_sr(rule_dict, subreddit): # , queues):
     rule_dict[subreddit.name] = {}
+
+    logger.debug("Yaml loading rules for /r/{}".format(subreddit.name))
+    for d in yaml.safe_load_all(subreddit.conditions_yaml):
+        pprint.pprint(d)
+    # pprint.pprint(yaml.safe_load_all(subreddit.conditions_yaml))
+
     rules = [Rule(d)
                 for d in yaml.safe_load_all(subreddit.conditions_yaml)
                 if isinstance(d, dict)]
+
     # for queue in queues:
     #     cond_dict[subreddit.name][queue] = filter_conditions(conditions, queue)
+
+    rule_dict[subreddit.name] = rules
 
 
 def load_all_rules(sr_dict): # , queues):
@@ -225,6 +262,7 @@ def get_moderated_subreddits():
 def main():
     global r
     sleep_after = True
+    reload_mod_subs = False
 
     prawlogger = logging.getLogger('prawcore')
     prawlogger.setLevel(logging.WARN)
@@ -248,6 +286,8 @@ def main():
 
             # load conditions from wiki
             rule_dict = load_all_rules(sr_dict)
+
+            pprint.pprint(rule_dict)
 
             break
 
@@ -305,14 +345,17 @@ def main():
                             if command == 'update':
                                 # refresh configuration for a subreddit
                                 # todo: cache duplicate requests from multiple mods
-                                update_from_wiki(sr_name, message.author)
+                                reload_mod_subs = True
+                                update_from_wiki(db_subreddit, message)
                             elif command == 'status':
                                 pass
                             elif command == 'enable':
                                 db_subreddit.enabled = True
+                                reload_mod_subs = True
                                 # TODO reload mod subs
                             elif command == 'disable':
                                 db_subreddit.enabled = False
+                                reload_mod_subs = True
                                 # TODO reload mod subs
                             elif command == 'leave':
                                 # leave moderator of subreddit
@@ -322,7 +365,7 @@ def main():
                                     # TODO not implemented yet
                                     # TODO reload mod subs
                                     raise NotImplementedError
-
+                                reload_mod_subs = True
                             # the following commands should respond with the enabled status
                             if command in ['status', 'enable', 'disable']:
                                 message.reply("Subreddit /r/{} is currently {}abled."
@@ -353,7 +396,12 @@ def main():
             # Then process queues: submission, comment, spam, report, comment reply, username mention
             # TODO: queue for edited items...
 
+            for sr_name, subreddit in sr_dict.items():
+                logger.debug("Checking items in /r/{}".format(sr_name))
 
+                for item in r.subreddit(sr_name).mod.spam():
+                    for rule in rule_dict[sr_name]:
+                        rule.process(item)
 
         except KeyboardInterrupt:
             raise
