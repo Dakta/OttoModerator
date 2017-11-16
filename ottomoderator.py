@@ -116,6 +116,24 @@ def unread_messages():
         if isinstance(message, praw.models.Message) and message.new:
             yield message
 
+def get_moderated_subreddits():
+    # get enabled subreddits
+    subreddits = (session.query(Subreddit)
+                  .filter(Subreddit.enabled == True)
+                  .all())
+
+    # we gotta refresh the list of modded subs
+    logger.info('Getting list of moderated subreddits')
+    modded_subs = [sr.display_name.lower() for sr in r.user.moderator_subreddits(limit=None)]
+
+    # get rid of any subreddits the bot doesn't moderate
+    # TODO: disable the ones we don't mod? Send an error message to modmail?
+    sr_dict = {sr.name.lower(): sr
+               for sr in subreddits
+               if sr.name.lower() in modded_subs}
+
+    return sr_dict
+
 
 def main():
     global r
@@ -134,10 +152,14 @@ def main():
                             user_agent    = cfg_file.get('reddit', 'user_agent'),
                             username      = cfg_file.get('reddit', 'username'),
                             password      = cfg_file.get('reddit', 'password'))
-            break
+            # break
         except Exception as e:
             logger.error('ERROR: {0}'.format(e))
             logger.debug(traceback.format_exc())
+        else:
+            sr_dict = get_moderated_subreddits()
+
+            break
 
     while True:
         # main execution loop
@@ -146,7 +168,38 @@ def main():
             for message in unread_messages():
                 try:
                     command = message.body.strip().lower()
-                    if command in ['update', 'status', 'enable', 'disable', 'leave']:
+                    if command == 'register':
+                        # try to accept mod invite
+                        sr_name = clean_sr_name(message.subject).lower()
+                        subreddit = r.subreddit(sr_name)
+
+                        try:
+                            subreddit.mod.accept_invite()
+                        except:
+                            message.reply("You must invite me to moderate /r/{} first."
+                                          .format(sr_name))
+                        else:
+                            # get sub from db:
+                            db_subreddit = None
+                            try:
+                                db_subreddit = (session.query(Subreddit)
+                                               .filter(Subreddit.name == sr_name)
+                                               .one())
+                            except NoResultFound:
+                                # add to DB
+                                db_subreddit = Subreddit()
+                                db_subreddit.name = subreddit.display_name.lower()
+                                db_subreddit.last_submission = datetime.utcnow() - timedelta(days=1)
+                                db_subreddit.last_spam = datetime.utcnow() - timedelta(days=1)
+                                db_subreddit.last_comment = datetime.utcnow() - timedelta(days=1)
+                                db_subreddit.conditions_yaml = ''
+                                session.add(db_subreddit)
+                            finally:
+                                # now that it definitely exists: set enabled (flush old rules?)
+                                db_subreddit.enabled = True
+                                session.commit()
+                            message.reply("I have joined /r/{}".format(db_subreddit.name))
+                    elif command in ['update', 'status', 'enable', 'disable', 'leave']:
                         # these require a database query
                         sr_name = clean_sr_name(message.subject).lower()
                         db_subreddit = None
@@ -167,14 +220,17 @@ def main():
                                 pass
                             elif command == 'enable':
                                 db_subreddit.enabled = True
+                                # TODO reload mod subs
                             elif command == 'disable':
                                 db_subreddit.enabled = False
+                                # TODO reload mod subs
                             elif command == 'leave':
                                 # leave moderator of subreddit
                                 if db_subreddit.enabled:
                                     message.reply("Please disable me on this subreddit first.")
                                 else:
                                     # TODO not implemented yet
+                                    # TODO reload mod subs
                                     raise NotImplementedError
 
                             # the following commands should respond with the enabled status
@@ -183,12 +239,10 @@ def main():
                                               .format(db_subreddit.name,
                                                       'en' if db_subreddit.enabled else 'dis'))
                         finally:
-                            # session commit?
-                            pass
-
-                    elif command == 'register':
-                        # not sure whether what the prodecure for this one should be yet...
-                        message.reply("# Error\n\nNot implemented.")
+                            session.commit()
+                    elif command == 'help':
+                        # should this just provide a link, or real command explanations?
+                        raise NotImplementedError
                     else:
                         # invalid command
                         message.reply("Invalid command.")
@@ -201,8 +255,13 @@ def main():
                 finally:
                     message.mark_read()
 
+            # changed mod subs
+            if reload_mod_subs:
+                sr_dict = get_moderated_subreddits()
 
             # Then process queues: submission, comment, spam, report, comment reply, username mention
+            # TODO: queue for edited items...
+
 
 
         except KeyboardInterrupt:
