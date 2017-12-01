@@ -38,12 +38,27 @@ class Criterion:
     def __init__(self, values):
         # convert the dict to attributes
         self.conditions = values
+        self.modifiers = dict()
+
+        # re-duplicate concatenated targets
+        # parse out modifiers
+        target_syntax = re.compile(r'^(?P<targets>[a-z0-9\_\+]+)(?P<modifiers>\([a-z0-9\_,]*\))?$')
+        for k, v in self.conditions.items():
+            parts = target_syntax.match(k)
+            # now split the targets and modifiers
+            # targets = []
+            # modifiers = []
+            # for target in targets:
+            #     self.conditions[target] = v
+            #     self.modifiers[target] = modifiers 
 
     def matches(self, item):
         logger.debug("Checking item {}".format(item))
         # Conditions are in self.__dict__
         for condition, value in self.conditions.items():
             logger.debug("- Checking `{}` for `{}`".format(condition, value))
+
+
 
             # uhhhh... this is kinda scary
             if not getattr(item, condition, None) == value:
@@ -230,14 +245,22 @@ def unread_messages():
     conversation threads), and /message/messages/unread no longer works:
     https://www.reddit.com/r/changelog/comments/6sfacz/-/dlcfjib/
 
+    Also, checking if an inbox item is a PM requires weeding out SubredditMessage types,
+    which are also (logically, but annoyingly), Message types.
+
     """
     global r
 
     for message in r.inbox.unread(limit=None):
         # pprint.pprint(repr(message))
+        # pprint.pprint(isinstance(message, praw.models.Message))
         # pprint.pprint(vars(message))
 
-        if isinstance(message, praw.models.Message) and message.new:
+        # annoyingly, we have to check whether something is a Message and *not* a SubredditMessage
+        if (isinstance(message, praw.models.Message) and
+            not isinstance(message, praw.models.SubredditMessage) and
+            message.new):
+            # ugh
             yield message
 
 def get_moderated_subreddits():
@@ -259,10 +282,26 @@ def get_moderated_subreddits():
     return sr_dict
 
 
+
+def build_multireddit_groups(subreddits):
+    """Splits a subreddit list into groups if necessary (due to url length)."""
+    multireddits = []
+    current_multi = []
+    current_len = 0
+    for sub in subreddits:
+        if current_len > 3300:
+            multireddits.append(current_multi)
+            current_multi = []
+            current_len = 0
+        current_multi.append(sub)
+        current_len += len(sub) + 1
+    multireddits.append(current_multi)
+
+    return multireddits
+
+
 def main():
     global r
-    sleep_after = True
-    reload_mod_subs = False
 
     prawlogger = logging.getLogger('prawcore')
     prawlogger.setLevel(logging.WARN)
@@ -292,6 +331,9 @@ def main():
             break
 
     while True:
+        sleep_after = True
+        reload_mod_subs = False
+
         # main execution loop
         try:
             # First, process command messages
@@ -299,17 +341,23 @@ def main():
                 try:
                     command = message.body.strip().lower()
                     if command == 'register':
-                        # try to accept mod invite
+                        # do we know this sub?
                         sr_name = clean_sr_name(message.subject).lower()
-                        subreddit = r.subreddit(sr_name)
+                        if sr_name in sr_dict.keys():
+                            message.reply("I already moderate /r/{}.\n\n".format(sr_name))
+                            continue
 
+                        # otherwise... try to accept mod invite
+                        subreddit = r.subreddit(sr_name)
                         try:
                             subreddit.mod.accept_invite()
                         except:
+                            # should be APIException(error_type='NO_INVITE_FOUND')
                             message.reply("You must invite me to moderate /r/{} first."
                                           .format(sr_name))
+                            raise
                         else:
-                            # get sub from db:
+                            # get sub from db if previously registered:
                             db_subreddit = None
                             try:
                                 db_subreddit = (session.query(Subreddit)
@@ -325,7 +373,8 @@ def main():
                                 db_subreddit.conditions_yaml = ''
                                 session.add(db_subreddit)
                             finally:
-                                # now that it definitely exists: set enabled (flush old rules?)
+                                # now that it definitely exists: set enabled
+                                # (should we flush old rules from the db?)
                                 db_subreddit.enabled = True
                                 session.commit()
                             message.reply("I have joined /r/{}".format(db_subreddit.name))
@@ -338,8 +387,8 @@ def main():
                                            .filter(Subreddit.name == sr_name)
                                            .one())
                         except NoResultFound:
-                            message.reply("Subreddit /r/{} is not registered with /u/{}."
-                                          .format(sr_name, cfg_file.get('reddit', 'username')))
+                            message.reply("Subreddit /r/{} is not registered with me."
+                                          .format(sr_name))
                         else:
                             # only proceed if we get a database hit.
                             if command == 'update':
@@ -381,6 +430,8 @@ def main():
                         message.reply("Invalid command.")
                 except NotImplementedError:
                     message.reply("Error: that feature is not yet implemented.")
+                except KeyboardInterrupt:
+                    raise
                 except Exception as e:
                     logger.error('ERROR: {0}'.format(e))
                     logger.debug(traceback.format_exc())
@@ -396,12 +447,81 @@ def main():
             # Then process queues: submission, comment, spam, report, comment reply, username mention
             # TODO: queue for edited items...
 
+            # Queue priority, in increasing specificity:
+            # - reports: multi/about/reports?only=(links|comments)
+            #   - comment
+            #   - submission
+            #   - any
+            # - spam: multi/about/spam?only=(links|comments)
+            #   - comment
+            #   - submission
+            #   - any
+            # - edited: multi/about/edited?only=(links|comments)
+            #   - comment
+            #   - submission
+            #   - any
+            # - reply: inbox
+            # - mention: inbox
+            # - submission: multi/new
+            # - comment: multi/comments
+
+            multi_mod_queues = ['reports', 'spam', 'edited'] # r.subreddit().mod.<q>
+            multi_queues = ['new', 'comments'] # r.subreddit().<q>
+            user_queues = ['comment_replies', 'submission_replies', 'mentions'] # r.user.inbox.<q>
+
+            # proof of concept
             for sr_name, subreddit in sr_dict.items():
                 logger.debug("Checking items in /r/{}".format(sr_name))
 
-                for item in r.subreddit(sr_name).mod.spam():
+                sr = r.subreddit(sr_name)
+
+                # mod-only level queues
+                for item in sr.mod.spam():
                     for rule in rule_dict[sr_name]:
                         rule.process(item)
+                for item in sr.mod.reports():
+                    for rule in rule_dict[sr_name]:
+                        rule.process(item)
+                for item in sr.mod.edited():
+                    for rule in rule_dict[sr_name]:
+                        rule.process(item)
+
+                # sub-level queues
+                for item in sr.mod.new():
+                    for rule in rule_dict[sr_name]:
+                        rule.process(item)
+                for item in sr.mod.comments():
+                    for rule in rule_dict[sr_name]:
+                        rule.process(item)
+
+                # user queues - not implemented
+
+
+            # for queue in queue_funcs:
+            #     subreddits = [s for s in sr_dict
+            #                   if s in cond_dict and len(cond_dict[s][queue]) > 0]
+            #     if len(subreddits) == 0:
+            #         continue
+
+            #     multireddits = build_multireddit_groups(subreddits)
+
+            #     # fetch and process the items for each multireddit
+            #     for multi in multireddits:
+            #         if queue == 'report':
+            #             limit = cfg_file.get('reddit', 'report_backlog_limit_hours')
+            #             stop_time = datetime.utcnow() - timedelta(hours=int(limit))
+            #         else:
+            #             stop_time = max(getattr(sr, 'last_'+queue)
+            #                              for sr in sr_dict.values()
+            #                              if sr.name in multi)
+
+            #         queue_subreddit = r.get_subreddit('+'.join(multi))
+            #         if queue_subreddit:
+            #             queue_func = getattr(queue_subreddit, queue_funcs[queue])
+            #             items = queue_func(limit=None)
+            #             check_items(queue, items, stop_time, sr_dict, cond_dict)
+
+
 
         except KeyboardInterrupt:
             raise
