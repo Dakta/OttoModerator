@@ -2,6 +2,14 @@
 
 A moderation bot for Reddit, based on AutoModerator.
 
+# Why?
+
+> AutoModerator already exists, why reinvent the wheel?
+
+The short answer: this wheel is a roughly hewn stone. It may be a wheel, but it could definitely be better.
+
+The long answer...
+
 In AutoModerator, configuration comprises a collection of Rules. Each Rule is itself a mixed collection of Match Conditions and response Actions. The match conditions specify criteria for selecting posts and comments, which are then responded to by the actions. For example:
 
     ---
