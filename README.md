@@ -95,4 +95,4 @@ During development, keep dependencies up to date:
 
 # Status
 
-**Warning:** this project is nowhere near fully functional and should not under any circumstances be used in production.
+**Warning:** this project is nowhere near fully functional and should not under any circumstances be used in production. If you'd like to be contacted about beta testing opportunities, please PM /u/dakta.
