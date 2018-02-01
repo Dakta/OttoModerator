@@ -16,6 +16,9 @@ from config import cfg_file
 from models import session
 from models import Subreddit
 
+# Rules functionality
+from rules import *
+
 # API wrapper
 import praw, prawcore
 
@@ -30,113 +33,6 @@ import pprint
 r = None
 
 
-
-
-class Criterion:
-    """A set of conditions for matching Actions against reddit content"""
-
-    def __init__(self, values):
-        # convert the dict to attributes
-        self.conditions = values
-        self.modifiers = dict()
-
-        # re-duplicate concatenated targets
-        # parse out modifiers
-        target_syntax = re.compile(r'^(?P<targets>[a-z0-9\_\+]+)(?P<modifiers>\([a-z0-9\_,]*\))?$')
-        for k, v in self.conditions.items():
-            parts = target_syntax.match(k)
-            # now split the targets and modifiers
-            # targets = []
-            # modifiers = []
-            # for target in targets:
-            #     self.conditions[target] = v
-            #     self.modifiers[target] = modifiers 
-
-    def matches(self, item):
-        logger.debug("Checking item {}".format(item))
-        # Conditions are in self.__dict__
-        for condition, value in self.conditions.items():
-            logger.debug("- Checking `{}` for `{}`".format(condition, value))
-
-
-
-            # uhhhh... this is kinda scary
-            if not getattr(item, condition, None) == value:
-                return False
-
-        # for condition in self.conditions:
-        #     if not condition.matches(item):
-        #         return False
-
-        return True
-
-
-class Action:
-    """A sequence of steps to perform on and in response to reddit content"""
-
-    def __init__(self, values):
-        self.actions = values
-
-    def perform_on(self, item):
-        for action, argument in self.actions.items():
-            method = getattr(item, action, getattr(item.mod, action, None))
-            if method:
-                method(argument)
-            else:
-                raise AttributeError("No such method {} on {}".format(method, item))
-
-class Rule:
-    """A collection of conditions and response actions triggered on matching content"""
-
-    def __init__(self, values):
-        # TODO lowercase keys
-        logger.debug("Creating new rule...")
-
-        self.yaml = yaml.dump(values)
-
-        # Handle single/multiple criteria
-        self.criteria = []
-        if isinstance(values["criteria"], list):
-            for criterion in values["criteria"]:
-                self.criteria.append(Criterion(criterion))
-        elif isinstance(values["criteria"], dict):
-            self.criteria.append(Criterion(values["criteria"]))
-
-        # same for actions
-        self.actions = []
-        if isinstance(values["actions"], list):
-            for action in values["actions"]:
-                self.actions.append(Action(action))
-        elif isinstance(values["actions"], dict):
-            self.actions.append(Action(values["actions"]))
-        # TODO consolidate the above two blocks, cleverly
-
-        pprint.pprint(vars(self))
-        for c in self.criteria:
-            pprint.pprint(vars(c))
-        for a in self.actions:
-            pprint.pprint(vars(a))
-
-
-    def matches(self, item):
-        # for reference later?
-        self.matched = []
-
-        for criterion in self.criteria:
-            if criterion.matches(item):
-                self.matched.append(criterion)
-
-        if len(self.matched) > 0:
-            return True
-
-    def _perform_actions_on(self, item):
-        for action in self.actions:
-            action.perform_on(item)
-
-    def process(self, item):
-        if self.matches(item):
-            logger.debug("Matched {}".format(item))
-            self._perform_actions_on(item)
 
 
 
@@ -331,10 +227,11 @@ def main():
             break
 
     while True:
+        # main execution loop
+
         sleep_after = True
         reload_mod_subs = False
 
-        # main execution loop
         try:
             # First, process command messages
             for message in unread_messages():
@@ -374,12 +271,12 @@ def main():
                                 session.add(db_subreddit)
                             finally:
                                 # now that it definitely exists: set enabled
-                                # (should we flush old rules from the db?)
+                                # (should we clear old rules from the db?)
                                 db_subreddit.enabled = True
                                 session.commit()
                             message.reply("I have joined /r/{}".format(db_subreddit.name))
                     elif command in ['update', 'status', 'enable', 'disable', 'leave']:
-                        # these require a database query
+                        # these require the same database query
                         sr_name = clean_sr_name(message.subject).lower()
                         db_subreddit = None
                         try:
@@ -401,20 +298,17 @@ def main():
                             elif command == 'enable':
                                 db_subreddit.enabled = True
                                 reload_mod_subs = True
-                                # TODO reload mod subs
                             elif command == 'disable':
                                 db_subreddit.enabled = False
                                 reload_mod_subs = True
-                                # TODO reload mod subs
                             elif command == 'leave':
                                 # leave moderator of subreddit
                                 if db_subreddit.enabled:
                                     message.reply("Please disable me on this subreddit first.")
                                 else:
                                     # TODO not implemented yet
-                                    # TODO reload mod subs
+                                    reload_mod_subs = True
                                     raise NotImplementedError
-                                reload_mod_subs = True
                             # the following commands should respond with the enabled status
                             if command in ['status', 'enable', 'disable']:
                                 message.reply("Subreddit /r/{} is currently {}abled."

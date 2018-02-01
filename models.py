@@ -20,7 +20,7 @@ else:
         cfg_file.get('database', 'database'))
 
 
-
+# initialize connection and session object
 Base = declarative_base()
 Session = sessionmaker(bind=engine, expire_on_commit=False)
 session = Session()
@@ -31,8 +31,7 @@ session = Session()
 # >>> Base.metadata.create_all(engine)
 
 class Subreddit(Base):
-
-    """Table containing the subreddits for the bot to monitor.
+    """Subreddits for the bot to monitor.
 
     name - The subreddit's name. "gaming", not "/r/gaming".
     enabled - Subreddit will not be checked if False
