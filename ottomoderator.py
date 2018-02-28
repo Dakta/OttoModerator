@@ -45,11 +45,12 @@ def update_from_wiki(db_subreddit, message):
 
     subreddit = r.subreddit(db_subreddit.name)
 
+    # TODO: this is redundant now
     if message.author not in subreddit.moderator():
         message.reply('Error: You do not moderate /r/{0}'.format(subreddit.display_name))
         return
 
-    # TODO: validate wiki permissions
+    # TODO: validate wiki permissions?
 
     try:
         page_content = subreddit.wiki[wiki_page_name].content_md
@@ -237,15 +238,20 @@ def main():
             for message in unread_messages():
                 try:
                     command = message.body.strip().lower()
+                    sr_name = clean_sr_name(message.subject).lower()
+                    subreddit = r.subreddit(sr_name)
+                    # TODO: validate user is moderator
+                    if message.author not in subreddit.moderator():
+                        message.reply('Error: You do not moderate /r/{0}'.format(subreddit.display_name))
+                        continue
+                    # OK, validated
                     if command == 'register':
                         # do we know this sub?
-                        sr_name = clean_sr_name(message.subject).lower()
                         if sr_name in sr_dict.keys():
                             message.reply("I already moderate /r/{}.\n\n".format(sr_name))
                             continue
 
                         # otherwise... try to accept mod invite
-                        subreddit = r.subreddit(sr_name)
                         try:
                             subreddit.mod.accept_invite()
                         except:
@@ -277,7 +283,6 @@ def main():
                             message.reply("I have joined /r/{}".format(db_subreddit.name))
                     elif command in ['update', 'status', 'enable', 'disable', 'leave']:
                         # these require the same database query
-                        sr_name = clean_sr_name(message.subject).lower()
                         db_subreddit = None
                         try:
                             db_subreddit = (session.query(Subreddit)
