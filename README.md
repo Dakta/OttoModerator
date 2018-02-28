@@ -56,7 +56,7 @@ Or we should be able to remove both comments and submissions based on reply by t
     ---
     criteria:
         type: comment
-        body (regex): "^\\!remove (.*)"
+        body (regex): '^!remove\s(.+)$'
         is_reply: true
         author:
             contributor: true # let's make the approved submitters list useful
