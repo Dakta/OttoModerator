@@ -1,7 +1,10 @@
 # TODO
 
+- Add `help` command for listing of currently available commands
+    + `help <command>` for specific command information
 - Restructure bot as a class to encapsulate reddit session
     + Get set up for unit testing
+- YAML modifiers parsing
 - More complex condition processing/validation
 - More complex action processing/validation
 
